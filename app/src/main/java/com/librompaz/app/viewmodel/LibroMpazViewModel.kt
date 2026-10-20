@@ -162,11 +162,17 @@ class LibroMpazViewModel : ViewModel() {
     }
 
     /**
-     * TODO(equipo): ids de los OA ya trabajados en el curso y asignatura (según las sesiones
-     * registradas). RF de UTP: "vistas analíticas de cobertura curricular por curso".
-     * Hoy devuelve un conjunto vacío.
+     * RF-07: ids de los OA ya trabajados en el curso y asignatura, reunidos desde las sesiones
+     * registradas y sin repetidos. Solo cuenta los OA que existen en el catálogo de la
+     * asignatura, para que el avance nunca supere el total. Solo lectura (UTP).
      */
-    fun oasTrabajados(cursoId: String?, asignaturaId: String?): Set<String> = emptySet()
+    fun oasTrabajados(cursoId: String?, asignaturaId: String?): Set<String> {
+        val catalogo = objetivosDe(asignaturaId).map { it.id }.toSet()
+        return sesionesDe(cursoId, asignaturaId)
+            .flatMap { it.oaIds }
+            .filter { it in catalogo }
+            .toSet()
+    }
 
     // =====================================================================
     // Módulo "Calificaciones"

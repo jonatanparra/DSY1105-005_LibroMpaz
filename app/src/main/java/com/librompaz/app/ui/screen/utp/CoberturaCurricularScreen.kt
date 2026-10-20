@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,15 +31,19 @@ import com.librompaz.app.viewmodel.LibroMpazViewModel
  * Módulo "Cobertura curricular" (UTP): por curso y asignatura, qué OA ya se trabajaron y cuáles
  * faltan. RF: "vistas analíticas consolidadas de cobertura curricular por curso".
  *
- * TODO(equipo): oasTrabajados() hoy devuelve un conjunto vacío (todo aparece "pendiente").
+ * RF-07: el cálculo vive en viewModel.oasTrabajados(); esta pantalla solo lo muestra.
  */
 @Composable
 fun CoberturaCurricularScreen(navController: NavHostController, viewModel: LibroMpazViewModel) {
     var curso by remember { mutableStateOf<Curso?>(viewModel.cursos.firstOrNull()) }
     var asignatura by remember { mutableStateOf<Asignatura?>(viewModel.asignaturas.firstOrNull()) }
 
+    // Observar las sesiones hace que la cobertura se recalcule cuando se registra una clase.
+    val sesiones by viewModel.sesiones.collectAsState()
     val objetivos = viewModel.objetivosDe(asignatura?.id)
-    val trabajados = viewModel.oasTrabajados(curso?.id, asignatura?.id)
+    val trabajados = remember(sesiones, curso, asignatura) {
+        viewModel.oasTrabajados(curso?.id, asignatura?.id)
+    }
     val avance = if (objetivos.isEmpty()) 0f else trabajados.size.toFloat() / objetivos.size
 
     Scaffold(topBar = { BarraSuperior("Cobertura curricular", navController) }) { padding ->
@@ -65,8 +70,12 @@ fun CoberturaCurricularScreen(navController: NavHostController, viewModel: Libro
                 onSeleccion = { asignatura = it }
             )
 
-            Text("OA trabajados: ${trabajados.size} de ${objetivos.size}", style = MaterialTheme.typography.titleMedium)
-            LinearProgressIndicator(progress = { avance }, modifier = Modifier.fillMaxWidth())
+            if (objetivos.isEmpty()) {
+                Text("Sin OA cargados", style = MaterialTheme.typography.titleMedium)
+            } else {
+                Text("OA trabajados: ${trabajados.size} de ${objetivos.size}", style = MaterialTheme.typography.titleMedium)
+                LinearProgressIndicator(progress = { avance }, modifier = Modifier.fillMaxWidth())
+            }
 
             objetivos.forEach { oa ->
                 val hecho = oa.id in trabajados
