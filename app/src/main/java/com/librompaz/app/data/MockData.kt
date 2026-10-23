@@ -18,12 +18,13 @@ import com.librompaz.app.model.Usuario
 
 /**
  * Datos 100% FICTICIOS (Ley 19.628 y Ley 21.719: prohibido usar nombres, RUT, antecedentes
- * académicos reales o diagnósticos PIE). Sirven para que las pantallas tengan algo que mostrar
- * mientras el equipo implementa Room.
+ * académicos reales o diagnósticos PIE). Usuarios, cursos, asignaturas, OA y sesiones se cargan
+ * una sola vez en Room (LibroMpazRepository.sembrarSiVacio()); el resto simula los módulos que
+ * no son parte del RF-07.
  */
 object MockData {
 
-    /** Usuarios de prueba para el login. LibroMpazViewModel.login() todavía NO los usa. */
+    /** Usuarios de prueba para el login (se guardan en Room la primera vez que abre la app). */
     val usuarios = listOf(
         Usuario("U1", "Docente Matemática (demo)", "docente.mat@libromp.cl", "docente123", Perfil.DOCENTE),
         Usuario("U2", "Docente Lenguaje (demo)", "docente.len@libromp.cl", "docente123", Perfil.DOCENTE),
@@ -67,6 +68,7 @@ object MockData {
 
     val sesiones = listOf(
         SesionClase("S1", "C3A", "MAT", "2026-10-01", "Bloque 1", listOf("OA-MAT-1"), "Conteo de 10 en 10 hasta 1.000.", "Docente Matemática (demo)", "2026-10-01 09:30"),
+        SesionClase("S2", "C4A", "LEN", "2026-10-02", "Bloque 2", listOf("OA-LEN-1"), "Lectura en voz alta de un cuento breve.", "Docente Lenguaje (demo)", "2026-10-02 10:10"),
     )
 
     val evaluaciones = listOf(

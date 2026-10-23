@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Recurso nativo: vibración. Es un permiso normal, no se pide en pantalla. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Recurso nativo: texto a voz. Desde Android 11 hay que declarar que la app busca el
+         motor de voz del sistema; no es un permiso y no se pide en pantalla. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"

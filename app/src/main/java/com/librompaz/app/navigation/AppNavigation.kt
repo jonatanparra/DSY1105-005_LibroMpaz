@@ -1,6 +1,7 @@
 package com.librompaz.app.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -63,9 +64,12 @@ object Rutas {
  */
 @Composable
 fun AppNavigation(
-    navController: NavHostController = rememberNavController(),
-    viewModel: LibroMpazViewModel = viewModel()
+    navController: NavHostController = rememberNavController()
 ) {
+    // El ViewModel necesita su Repository, por eso se crea con una fábrica.
+    val contexto = LocalContext.current.applicationContext
+    val viewModel: LibroMpazViewModel = viewModel(factory = LibroMpazViewModel.fabrica(contexto))
+
     val cerrarSesion: () -> Unit = {
         viewModel.logout()
         navController.navigate(Rutas.LOGIN) {

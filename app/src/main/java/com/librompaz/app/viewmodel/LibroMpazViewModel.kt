@@ -1,7 +1,14 @@
 package com.librompaz.app.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.librompaz.app.data.LibroMpazRepository
 import com.librompaz.app.data.MockData
+import com.librompaz.app.data.local.AppDatabase
 import com.librompaz.app.model.Anotacion
 import com.librompaz.app.model.Asignatura
 import com.librompaz.app.model.Calificacion
@@ -17,26 +24,25 @@ import com.librompaz.app.model.ResumenCurso
 import com.librompaz.app.model.SesionClase
 import com.librompaz.app.model.TipoAnotacion
 import com.librompaz.app.model.Usuario
+import com.librompaz.app.util.calcularOasTrabajados
+import com.librompaz.app.util.textoCobertura
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * ViewModel único, compartido por todas las pantallas (se crea una sola vez en AppNavigation).
  *
- * ESTO ES UN ESQUELETO: las pantallas ya llaman a todas estas funciones, pero la lógica de
- * negocio del caso está vacía a propósito y marcada con TODO(equipo), citando el módulo de
- * Requerimientos_DSY1105-005 al que corresponde. Mientras no se implemente:
- *  - el login siempre rechaza (usar "Modo desarrollo" en la pantalla de login),
- *  - el docente ve todas las cargas (no solo las suyas),
- *  - guardar asistencia, clases, notas y anotaciones no hace nada,
- *  - las vistas de UTP, Inspectoría y Dirección no calculan métricas,
- *  - no se registra auditoría.
- *
- * Regla de negocio transversal: TODA creación o modificación debe dejar un RegistroAuditoria
- * (usuario, fecha y hora) automático e inalterable. Implementarla en cada función que guarde.
+ * Alcance de esta entrega: RF-07 (UTP ve la cobertura curricular por curso).
+ *  - Lo que usa el RF-07 viene de Room a través del Repository: usuarios (login), cursos,
+ *    asignaturas, OA y sesiones.
+ *  - Los demás módulos (asistencia, notas, hoja de vida, Inspectoría, Dirección) quedan
+ *    simulados con MockData y siguen marcados con TODO(equipo): no son parte de este avance.
  */
-class LibroMpazViewModel : ViewModel() {
+class LibroMpazViewModel(private val repositorio: LibroMpazRepository) : ViewModel() {
 
     // =====================================================================
     // Módulo "Autenticación y alcance por rol"
@@ -48,40 +54,95 @@ class LibroMpazViewModel : ViewModel() {
     private val _errorLogin = MutableStateFlow<String?>(null)
     val errorLogin: StateFlow<String?> = _errorLogin.asStateFlow()
 
-    /**
-     * TODO(equipo): autenticar contra MockData.usuarios (o el backend que confirme el CITT).
-     * Validar campos vacíos (patrón Guía 11). Si es correcto: dejar _usuarioActivo y devolver
-     * true (AppNavigation ya lleva a cada perfil a su pantalla). Si no: _errorLogin y false.
-     */
-    fun login(usuario: String, clave: String): Boolean {
-        _errorLogin.value = "Login sin implementar — ver TODO(equipo) en LibroMpazViewModel.login()."
-        return false
+    // Un error por campo (se muestra junto al campo) y uno general para credenciales malas.
+    private val _errorUsuario = MutableStateFlow<String?>(null)
+    val errorUsuario: StateFlow<String?> = _errorUsuario.asStateFlow()
+
+    private val _errorClave = MutableStateFlow<String?>(null)
+    val errorClave: StateFlow<String?> = _errorClave.asStateFlow()
+
+    // Las validaciones están aquí y no en la pantalla: devuelven el mensaje de error o null.
+    fun validarUsuario(texto: String): String? = when {
+        texto.isBlank() -> "Ingresa tu correo."
+        !FORMATO_CORREO.matches(texto.trim()) -> "El correo no tiene un formato válido."
+        else -> null
     }
 
+    fun validarClave(texto: String): String? =
+        if (texto.isEmpty()) "Ingresa tu clave." else null
+
     /**
-     * SOLO PARA DESARROLLO: entra con el primer usuario de prueba del perfil indicado, sin
-     * validar credenciales. TODO(equipo): eliminar esta función y los botones "Modo desarrollo".
+     * Primero valido los campos; si están bien, le pregunto al Repository (que consulta Room)
+     * si el correo y la clave existen. Si es así dejo al usuario activo y aviso a la pantalla
+     * con onIngreso, que lo lleva a su panel según el perfil.
      */
-    fun entrarModoDesarrollo(perfil: Perfil) {
-        _usuarioActivo.value = MockData.usuarios.first { it.perfil == perfil }
+    fun login(usuario: String, clave: String, onIngreso: (Perfil) -> Unit) {
+        _errorUsuario.value = validarUsuario(usuario)
+        _errorClave.value = validarClave(clave)
+        _errorLogin.value = null
+        if (_errorUsuario.value != null || _errorClave.value != null) return
+
+        viewModelScope.launch {
+            val encontrado = repositorio.autenticar(usuario.trim(), clave)
+            if (encontrado == null) {
+                _errorLogin.value = "Correo o clave incorrectos."
+            } else {
+                _usuarioActivo.value = encontrado
+                onIngreso(encontrado.perfil)
+            }
+        }
+    }
+
+    // Cuando el usuario vuelve a escribir, saco los errores anteriores.
+    fun limpiarErroresLogin() {
+        _errorUsuario.value = null
+        _errorClave.value = null
         _errorLogin.value = null
     }
 
     fun logout() {
         _usuarioActivo.value = null
-        _errorLogin.value = null
+        limpiarErroresLogin()
         _cursoSeleccionadoId.value = null
         _asignaturaSeleccionadaId.value = null
+    }
+
+    companion object {
+        private val FORMATO_CORREO = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+
+        // El ViewModel necesita su Repository, así que ya no se puede crear vacío: esta
+        // fábrica arma la cadena Room -> DAO -> Repository -> ViewModel.
+        fun fabrica(contexto: Context): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val dao = AppDatabase.obtener(contexto).coberturaDao()
+                LibroMpazViewModel(LibroMpazRepository(dao))
+            }
+        }
     }
 
     // =====================================================================
     // Datos de referencia y selección (no es lógica de negocio)
     // =====================================================================
 
-    val cursos: List<Curso> = MockData.cursos
-    val asignaturas: List<Asignatura> = MockData.asignaturas
+    // Estos datos vienen de Room. stateIn convierte el Flow del Repository en un StateFlow, así
+    // las pantallas que lo observan se actualizan solas cuando cambia la base de datos.
+    val cursosEstado: StateFlow<List<Curso>> =
+        repositorio.cursos.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val asignaturasEstado: StateFlow<List<Asignatura>> =
+        repositorio.asignaturas.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val objetivosEstado: StateFlow<List<ObjetivoAprendizaje>> =
+        repositorio.objetivos.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    init {
+        // La primera vez la base está vacía: se llena con los datos ficticios.
+        viewModelScope.launch { repositorio.sembrarSiVacio() }
+    }
+
+    // Atajos para las pantallas de los otros módulos, que leen la lista actual.
+    val cursos: List<Curso> get() = cursosEstado.value
+    val asignaturas: List<Asignatura> get() = asignaturasEstado.value
+    private val objetivos: List<ObjetivoAprendizaje> get() = objetivosEstado.value
     private val estudiantes: List<Estudiante> = MockData.estudiantes
-    private val objetivos: List<ObjetivoAprendizaje> = MockData.objetivos
 
     private val _cursoSeleccionadoId = MutableStateFlow<String?>(null)
     val cursoSeleccionadoId: StateFlow<String?> = _cursoSeleccionadoId.asStateFlow()
@@ -147,11 +208,11 @@ class LibroMpazViewModel : ViewModel() {
     // Módulo "Cobertura curricular"
     // =====================================================================
 
-    private val _sesiones = MutableStateFlow(MockData.sesiones)
-    val sesiones: StateFlow<List<SesionClase>> = _sesiones.asStateFlow()
+    val sesiones: StateFlow<List<SesionClase>> =
+        repositorio.sesiones.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun sesionesDe(cursoId: String?, asignaturaId: String?): List<SesionClase> =
-        _sesiones.value.filter { it.cursoId == cursoId && it.asignaturaId == asignaturaId }
+        sesiones.value.filter { it.cursoId == cursoId && it.asignaturaId == asignaturaId }
 
     /**
      * TODO(equipo): guardar la sesión con los OA y el contenido trabajados, con auditoría.
@@ -162,17 +223,20 @@ class LibroMpazViewModel : ViewModel() {
     }
 
     /**
-     * RF-07: ids de los OA ya trabajados en el curso y asignatura, reunidos desde las sesiones
-     * registradas y sin repetidos. Solo cuenta los OA que existen en el catálogo de la
-     * asignatura, para que el avance nunca supere el total. Solo lectura (UTP).
+     * RF-07: ids de los OA ya trabajados en el curso y asignatura (solo lectura, UTP).
+     * El cálculo está en util/Cobertura.kt para poder probarlo con un test simple.
      */
-    fun oasTrabajados(cursoId: String?, asignaturaId: String?): Set<String> {
-        val catalogo = objetivosDe(asignaturaId).map { it.id }.toSet()
-        return sesionesDe(cursoId, asignaturaId)
-            .flatMap { it.oaIds }
-            .filter { it in catalogo }
-            .toSet()
-    }
+    fun oasTrabajados(cursoId: String?, asignaturaId: String?): Set<String> =
+        calcularOasTrabajados(sesiones.value, objetivos, cursoId, asignaturaId)
+
+    /** Frase con la cobertura, para leerla en voz alta desde la pantalla (texto a voz). */
+    fun textoCoberturaParaVoz(cursoId: String?, asignaturaId: String?): String =
+        textoCobertura(
+            nombreCurso = cursoPorId(cursoId)?.nombre.orEmpty(),
+            nombreAsignatura = asignaturaPorId(asignaturaId)?.nombre.orEmpty(),
+            objetivos = objetivosDe(asignaturaId),
+            trabajados = oasTrabajados(cursoId, asignaturaId)
+        )
 
     // =====================================================================
     // Módulo "Calificaciones"
