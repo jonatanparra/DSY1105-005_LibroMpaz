@@ -8,6 +8,7 @@ App Android del caso de Vinculación con el Medio **"Libro Digital de Clases Int
 
 - Williams Rivera García
 - Jonatan Parra
+- Vicente Azocar
 
 Repositorio GitHub: https://github.com/jonatanparra/DSY1105-005_LibroMpaz
 Tablero Trello: https://trello.com/invite/b/6ad7bc4dacc0bff4c215c54b/ATTI07e4760a1e5650536d22f7976bb6ffceE3294BD8/libro-mpaz
