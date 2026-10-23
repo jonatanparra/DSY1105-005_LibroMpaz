@@ -1,16 +1,23 @@
 package com.librompaz.app.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -20,8 +27,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -36,30 +44,34 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.librompaz.app.R
 import com.librompaz.app.model.Perfil
+import com.librompaz.app.util.vibrar
 import com.librompaz.app.viewmodel.LibroMpazViewModel
 
 /**
- * Módulo "Autenticación y alcance por rol": inicio de sesión. Según el perfil (Docente, UTP,
- * Inspectoría o Dirección), AppNavigation lleva a la pantalla principal de cada uno.
+ * Inicio de sesión. La pantalla solo muestra los campos y los errores; las validaciones y la
+ * consulta a Room las hace el ViewModel. Según el perfil, AppNavigation lleva a cada panel.
  * Regla del caso: no existe acceso para estudiantes ni apoderados.
  *
- * La pantalla está completa, pero viewModel.login() es TODO(equipo): por ahora siempre
- * rechaza. Mientras tanto, los botones "Modo desarrollo" permiten entrar con cada perfil.
- * TODO(equipo): eliminarlos antes de la entrega final.
- *
- * Usuarios de prueba (MockData.usuarios): docente.mat@libromp.cl / docente123,
- * utp@libromp.cl / utp123, inspectoria@libromp.cl / inspectoria123,
- * direccion@libromp.cl / direccion123.
+ * Usuarios de prueba (ficticios): ver README.md.
  */
 @Composable
 fun LoginScreen(
     viewModel: LibroMpazViewModel,
     onIngresar: (Perfil) -> Unit
 ) {
+    val contexto = LocalContext.current
     var usuario by remember { mutableStateOf("") }
     var clave by remember { mutableStateOf("") }
     var claveVisible by remember { mutableStateOf(false) }
-    val error by viewModel.errorLogin.collectAsState()
+    val errorLogin by viewModel.errorLogin.collectAsState()
+    val errorUsuario by viewModel.errorUsuario.collectAsState()
+    val errorClave by viewModel.errorClave.collectAsState()
+
+    // Recurso nativo: el teléfono vibra cuando aparece un error de login.
+    val hayError = errorLogin != null || errorUsuario != null || errorClave != null
+    LaunchedEffect(hayError) {
+        if (hayError) vibrar(contexto)
+    }
 
     Scaffold { padding ->
         Column(
@@ -85,8 +97,18 @@ fun LoginScreen(
 
             OutlinedTextField(
                 value = usuario,
-                onValueChange = { usuario = it },
-                label = { Text("Usuario o correo") },
+                onValueChange = {
+                    usuario = it
+                    viewModel.limpiarErroresLogin()
+                },
+                label = { Text("Correo") },
+                leadingIcon = { Icon(Icons.Filled.Email, contentDescription = null) },
+                isError = errorUsuario != null,
+                supportingText = if (errorUsuario != null) {
+                    { MensajeError(errorUsuario.orEmpty()) }
+                } else {
+                    null
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
@@ -94,8 +116,18 @@ fun LoginScreen(
 
             OutlinedTextField(
                 value = clave,
-                onValueChange = { clave = it },
+                onValueChange = {
+                    clave = it
+                    viewModel.limpiarErroresLogin()
+                },
                 label = { Text("Clave") },
+                leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
+                isError = errorClave != null,
+                supportingText = if (errorClave != null) {
+                    { MensajeError(errorClave.orEmpty()) }
+                } else {
+                    null
+                },
                 singleLine = true,
                 visualTransformation = if (claveVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -110,31 +142,37 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            if (error != null) {
-                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+            // Animación: el mensaje de credenciales incorrectas aparece y desaparece suave.
+            AnimatedVisibility(visible = errorLogin != null) {
+                MensajeError(errorLogin.orEmpty())
             }
 
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    if (viewModel.login(usuario.trim(), clave)) {
-                        viewModel.usuarioActivo.value?.perfil?.let(onIngresar)
-                    }
-                }
+                onClick = { viewModel.login(usuario.trim(), clave, onIngresar) }
             ) { Text("Ingresar") }
 
-            // ---- SOLO PARA DESARROLLO ---- TODO(equipo): eliminar antes de entregar.
+            // RNF-11: la app es una herramienta interna, sin validez oficial.
             Text(
-                "Modo desarrollo (entrar sin login):",
-                style = MaterialTheme.typography.labelMedium,
+                "Prototipo académico de uso interno",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Perfil.entries.forEach { perfil ->
-                TextButton(onClick = {
-                    viewModel.entrarModoDesarrollo(perfil)
-                    onIngresar(perfil)
-                }) { Text("Entrar como ${perfil.etiqueta}") }
-            }
         }
+    }
+}
+
+// Mensaje de error con ícono, para que el error se note también sin depender solo del color.
+@Composable
+private fun MensajeError(texto: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = Icons.Filled.Error,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(texto, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
 }
